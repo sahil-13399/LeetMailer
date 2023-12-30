@@ -1,2 +1,3 @@
 node_modules
 **/registeredEmail.json
+secrets.json

@@ -2,48 +2,53 @@ const express = require("express");
 const fs = require("fs/promises");
 const cron = require("node-cron");
 const axios = require("axios");
+const sendEmail = require('./sendEmail')
 const app = express();
 const PORT = 8000;
+const REGISTERED_EMAILS_FILE = "./registered_emails/registeredEmail.json";
 
-let registeredEmails = null;
 app.use(express.json());
 
-const setup = () => {
+const setup = async () => {
+  try {
     console.log("Inside setup");
-  fs.readFile(
-    "./registered_emails/registeredEmail.json",
-    "utf-8").then(data => {
-        registeredEmails = JSON.parse(data);
-        for (let i = 0; i < registeredEmails.length; i++) {
-          const {
+    const data = await fs.readFile(REGISTERED_EMAILS_FILE, "utf-8");
+    const registeredEmails = JSON.parse(data);
+
+    for (const {
+      email,
+      bucketList,
+      noOfQuestions,
+      lastAttemptedQuestion,
+      time,
+    } of registeredEmails) {
+      const cronExpression = convertTimeToCronExpression(time);
+      console.log(`Calling send mail API for email id: ${email} ${cronExpression}`);
+
+      cron.schedule(cronExpression, async () => {
+        const question = lastAttemptedQuestion || 0;
+
+        try {
+          const response = await axios.post("http://localhost:8000/api/v1/send-email", {
             email,
             bucketList,
             noOfQuestions,
-            lastAttemptedQuestion,
-            time,
-          } = registeredEmails[i];
-          const cronExpression = convertTimeToCronExpression(time);
-          console.log("Calling send mail API for email id :: " + email + " " + cronExpression);
-          cron.schedule(cronExpression, () => {
-            const question =
-              lastAttemptedQuestion === undefined ? 0 : lastAttemptedQuestion;
-            axios.post("http://localhost:8000/api/v1/send-email", {
-              email,
-              bucketList,
-              noOfQuestions,
-              question,
-            }).then((res) => {
-              console.log("Leetcode questions will be sent to email " + email + " at " + time);
-            }).catch((err) => {
-              console.log("Error occurred while sending an email to :: ", email);
-            })
-          }); 
-        }
-        app.listen(PORT, () => {
-            registeredEmails != null && console.log("Setup completed");
-            console.log("Started server");
+            question,
           });
-    }).catch(err => console.log("Error occurred while reading the file", err));
+          console.log(`Leetcode questions will be sent to email ${email} at ${time}`);
+        } catch (err) {
+          console.error(`Error occurred while sending an email to: ${email}`, err);
+        }
+      });
+    }
+
+    app.listen(PORT, () => {
+      registeredEmails !== null && console.log("Setup completed");
+      console.log("Server started");
+    });
+  } catch (err) {
+    console.error("Error occurred while reading the file", err);
+  }
 };
 
 function convertTimeToCronExpression(time) {
@@ -71,15 +76,10 @@ app.get("/", (req, res) => {
   res.json({ message: "Leetmailer app" });
 });
 
-app.post("/api/v1/send-email", (req, res) => {
-    const {
-        email,
-        bucketList,
-        noOfQuestions,
-        lastAttemptedQuestion,
-        time,
-      } = res.body;
-      console.log("Sending email to ",email);
-  });
+app.post("/api/v1/send-email",async (req, res) => {
+  const { email, bucketList, noOfQuestions, lastAttemptedQuestion, time } = req.body;
+  await sendEmail(email)
+  console.log(`Sending email to ${email}`);
+});
 
 setup();
